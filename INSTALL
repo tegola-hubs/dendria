@@ -1,0 +1,26 @@
+On ubuntu...
+
+   ## get things up to date
+   apt-get update
+   apt-get -y dist-upgrade
+   apt-get -y autoremove
+
+   ## a decent web server
+   apt-get -y install nginx
+   ## a lekker database
+   apt-get -y install mongodb
+
+   ## some python bindings are in C and need to be built
+   apt-get -y install gcc
+   apt-get -y install python-dev
+   apt-get -y install libsnmp-dev
+
+
+   ## sandbox our python scripts
+   apt-get -y install python-virtualenv
+   apt-get -y install python-pymongo
+   apt-get -y install libsnmp-python
+
+   ## preamble over, now set things up
+   virtualenv --system-site-packages /opt/tegola
+   . /opt/tegola/bin/activate
