@@ -103,6 +103,28 @@ def auth_parser(p):
     p.set_defaults(func=auth)
     p.set_defaults(parser=p)
 
+def merge_host(db, ident):
+    saved = []
+    for source in ("snmp", "login", "annotations"):
+        collection = getattr(db, source)
+        d = collection.find_one({"ident": ident})
+        if d is not None:
+            del d["_id"]
+            saved.append(d)
+    merged = mergedict(saved)
+    old = db.hosts.find_one({"ident": ident}, {"_id": True})
+    if old is not None:
+        merged["_id"] = old["_id"]
+    merged["timestamp"] = time.time()
+
+    ## xxx should this be here? make sure interfaces are sorted
+    ifaces = merged.get("interfaces")
+    if ifaces is not None:
+        ifaces.sort(lambda x,y: cmp(x.get("ifindex", 0), y.get("ifindex", 0)))
+        merged["interfaces"] = ifaces
+    db.hosts.save(merged)
+    return merged
+
 def interrogate(args):
     db = get_db(args)
     hostname = args.hostname[0]
@@ -154,29 +176,12 @@ def interrogate(args):
         collection.save(v)   
 
     if args.merge:
-        saved = []
-        for source in ("snmp", "login"):
-            collection = getattr(db, source)
-            d = collection.find_one({"ident": ident})
-            if d is not None:
-                del d["_id"]
-                saved.append(d)
-        merged = mergedict(saved)
+        merged = merge_host(db, ident)
+
         if "snmp" in descriptions:
             merged["snmp"] = True
         if "login" in descriptions:
             merged["login"] = True
-        old = db.hosts.find_one({"ident": ident}, {"_id": True})
-        if old is not None:
-            merged["_id"] = old["_id"]
-        merged["timestamp"] = time.time()
-
-        ## xxx should this be here? make sure interfaces are sorted
-        ifaces = merged.get("interfaces")
-        if ifaces is not None:
-            ifaces.sort(lambda x,y: cmp(x.get("ifindex", 0), y.get("ifindex", 0)))
-            merged["interfaces"] = ifaces
-        db.hosts.save(merged)
 
         from pymongo.database import DBRef
         for iface in merged["interfaces"]:
@@ -236,10 +241,12 @@ def host(args):
         print json.dumps(hostinfo)
     elif args.pprint:
         for host in hostinfo:
-            pprint(host)
+            if host is not None:
+                pprint(host)
     else:
         for host in hostinfo:
-            hprint(db, host)
+            if host is not None:
+                hprint(db, host)
 
 def hprint(db, host):
     print "=" * 80
@@ -503,7 +510,9 @@ def config(args):
     from rlogin import Rcmd
     import pexpect
 
-    if hinfo["flavour"].lower() == "openwrt" or hinfo["flavour"] == "NanoBSD":
+    if hinfo.get("flavour") is None:
+        log.warning("[%(name)s] Couldn't determine which OS variant to use for backing up, sorry." % hinfo)
+    elif hinfo["flavour"].lower() == "openwrt" or hinfo["flavour"] == "NanoBSD":
         cfgpath = os.path.join(cfgpath, hinfo["ident"])
         trymkdir(cfgpath)
         c = Rcmd(host=getaddr(hinfo),
@@ -542,3 +551,72 @@ def config_parser(p):
     p.add_argument("hostname", nargs=1, help="Hostname")
                    
     p.set_defaults(func=config)
+
+def oauth(args):
+    db = get_db(args)
+
+    site = db.oauth.find_one({ "name": [args.site_name] })
+    if site is None:
+        site = {}
+    site["name"] = args.site_name[0]
+    site["client_id"] = args.client_id[0]
+    site["client_secret"] = args.client_secret[0]
+    site["oauth_url"] = args.oauth_url[0]
+
+    db.oauth.save(site)
+
+def oauth_parser(p):
+    p.add_argument("site_name", nargs=1, help="Site Slug")
+    p.add_argument("client_id", nargs=1, help="Client ID")
+    p.add_argument("client_secret", nargs=1, help="Client Secret")
+    p.add_argument("oauth_url", nargs=1, help="OAuth URL")
+    p.set_defaults(func=oauth)
+
+def annotate(args):
+    db = get_db(args)
+
+    hostname = args.hostname[0]
+    authinfo = db.authinfo.find_one({"name": hostname})
+    if authinfo is None or authinfo.get("login") is None:
+        log.error("Do not have a username for this host, interrogate it first, please")
+        return
+
+    hinfo = gethostbyv4addr(db, hostname)
+    if hinfo is None:
+        hinfo = gethostbymacaddr(db, hostname)
+        if hinfo is None:
+            log.error("Interrogate this host first, please")
+            return
+    elif len(hinfo) == 1:
+        hinfo = hinfo[0]
+    elif len(hinfo) > 1:
+        log.error("Several matching hosts found:")
+        for h in hinfo:
+            log.error("    %s" % h["ident"])
+        log.error("Try using the identifier instead.")
+
+    annotations = db.annotations.find_one({ "ident": hinfo["ident"]})
+    if annotations is None:
+        annotations = { "ident": hinfo["ident"] }
+
+    if args.json:
+        value = json.loads(args.value[0])
+    else:
+        value = args.value[0]
+
+    if args.key[0] in annotations and not value:
+        del annotations[args.key[0]]
+    else:
+        annotations[args.key[0]] = value
+
+    db.annotations.save(annotations)
+
+    merge_host(db, hinfo["ident"])
+
+def annotate_parser(p):
+    p.add_argument("hostname", nargs=1, help="IP or MAC address")
+    p.add_argument("key", nargs=1, help="Key")
+    p.add_argument("value", nargs=1, help="Value")
+    p.add_argument("-j", dest="json", action="store_true", default=False,
+                   help="Value is JSON")
+    p.set_defaults(func=annotate)

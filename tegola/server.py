@@ -5,6 +5,7 @@ from werkzeug.utils import redirect
 from storage import deref
 from queries import freqinfo, getlladj
 import json
+import httplib, urllib, urlparse
 
 log = __import__("logging").getLogger(__name__)
 
@@ -13,6 +14,7 @@ class TegolaRest(object):
         self.db = db
         self.mountpoint = ""
         self.url_map = Map([
+                Rule("%s/oauth/<site_name>" % mountpoint, endpoint="oauth"),
                 Rule("%s/host/<macaddr>" % mountpoint, endpoint="host"),
                 Rule("%s/host/<macaddr>/adj/link" % mountpoint, endpoint="link_adj"),
                 Rule("%s/host/<macaddr>/adj/network" % mountpoint, endpoint="network_adj"),
@@ -83,3 +85,56 @@ class TegolaRest(object):
             freq = freq + " GHz"
         info = freqinfo(self.db, freq)
         return Response(json.dumps(info), mimetype="application/json")
+
+    def on_oauth(self, request, site_name):
+        site = self.db.oauth.find_one({ "name": site_name })
+        if site is None:
+            raise NotFound(site)
+        params = {
+            "client_id": site["client_id"],
+            "client_secret": site["client_secret"],
+            "code": request.args.get("code"),
+            }
+        state = request.args.get("state")
+        if state is not None:
+            params["state"] = state
+        redirect_uri = request.args.get("redirect_uri")
+        if redirect_uri:
+            params["redirect_uri"] = redirect_uri
+
+        fp = open("/tmp/debug", "w")
+        from pprint import pformat
+        fp.write(pformat(site["oauth_url"]) + "\n")
+        fp.write(pformat(params) + "\n")
+
+        oauth_url = urlparse.urlparse(site["oauth_url"])
+        if oauth_url.scheme == "https":
+            conn = httplib.HTTPSConnection(oauth_url.netloc)
+        else:
+            conn = httplib.HTTPConnection(oauth_url.netloc)
+
+        headers = {
+            "Content-type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "Host": oauth_url.netloc
+            }
+        conn.request("POST", oauth_url.path, urllib.urlencode(params), headers)
+        response = conn.getresponse()
+
+        fp.write(pformat(response.getheaders()) + "\n")
+        fp.close()
+
+        if response.status != 200:
+            raise KeyError("%s %s" % (response.status, response.reason))
+
+        data = json.loads(response.read())
+        if redirect_uri is not None:
+            location = redirect_uri
+        elif state is not None:
+            location = state
+        else:
+            raise NotFound("shrug")
+        if "?" not in location:
+            location += "?"
+        location += urllib.urlencode(data)
+        return redirect(location)
