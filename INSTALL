@@ -20,6 +20,7 @@ On ubuntu...
    apt-get -y install python-virtualenv
    apt-get -y install python-pymongo
    apt-get -y install libsnmp-python
+   apt-get -y install python-pyrrd
 
    ## preamble over, now set things up
    virtualenv --system-site-packages /opt/tegola

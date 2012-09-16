@@ -41,6 +41,7 @@ HUBS Project Network Management
         "pexpect",
         "werkzeug",
         "flup",
+        "pyrrd",
     ],
     entry_points="""
         # -*- Entry points: -*-
