@@ -4,7 +4,7 @@ import sys, os
 version = '0.1'
 
 setup(
-    name='tegola',
+    name='dendria',
     version=version,
     description="HUBS Project Network Management",
     long_description="""\
@@ -29,7 +29,7 @@ HUBS Project Network Management
     keywords="snmp network management",
     author='William Waites',
     author_email='wwaites@tardis.ed.ac.uk',
-    url="http://tegola.org.uk/",
+    url="http://www.tegola.org.uk/",
     license='AGPL',
     packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
     include_package_data=True,
@@ -45,6 +45,6 @@ HUBS Project Network Management
     entry_points="""
         # -*- Entry points: -*-
         [console_scripts]
-        tegola=tegola.cmd:_cli
+        dendria=dendria.cmd:_cli
     """,
 )
